@@ -1,0 +1,35 @@
+name: kopy
+description: "PC ↔ 手机 剪贴板实时同步 & 文件互传 & 屏幕投屏"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+  file_picker: ^8.0.0
+  open_filex: ^4.3.4
+  path_provider: ^2.1.2
+  flutter_inappwebview: ^6.1.5
+  sqflite: ^2.3.2
+  path: ^1.9.0
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.2.0
+  camera: ^0.11.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  riverpod_generator: ^2.3.9
+  build_runner: ^2.4.8
+  custom_lint: ^0.5.11
+  riverpod_lint: ^2.3.7
+
+flutter:
+  uses-material-design: true
