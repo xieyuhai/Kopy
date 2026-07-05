@@ -42,7 +42,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
     try {
       final uri = Uri.parse(rawValue);
       if (uri.scheme == 'clipboardsync' || uri.scheme == 'http') {
-        ip = uri.host;
+        ip = uri.hasPort ? '${uri.host}:${uri.port}' : uri.host;
       }
     } catch (_) {
       // URI 解析失败，继续尝试裸 IP
@@ -50,10 +50,13 @@ class _QrScannerPageState extends State<QrScannerPage> {
 
     // 尝试匹配裸 IP 地址
     if (ip == null || ip.isEmpty) {
-      final ipMatch =
-          RegExp(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b')
-              .firstMatch(rawValue);
-      ip = ipMatch?.group(1);
+      final ipMatch = RegExp(
+        r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?\b',
+      ).firstMatch(rawValue);
+      if (ipMatch != null) {
+        final port = ipMatch.group(2);
+        ip = port == null ? ipMatch.group(1) : '${ipMatch.group(1)}:$port';
+      }
     }
 
     if (ip != null && ip.isNotEmpty) {
@@ -103,10 +106,7 @@ class _QrScannerPageState extends State<QrScannerPage> {
       body: Stack(
         children: [
           // 相机预览
-          MobileScanner(
-            controller: _controller,
-            onDetect: _onDetect,
-          ),
+          MobileScanner(controller: _controller, onDetect: _onDetect),
 
           // 扫描框覆盖层
           Center(

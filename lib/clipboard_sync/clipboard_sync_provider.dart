@@ -18,6 +18,8 @@ import 'package:open_filex/open_filex.dart';
 import 'background_service.dart';
 import 'clipboard_sync_service.dart';
 
+const _unset = Object();
+
 @immutable
 class ClipboardSyncState {
   /// 桌面端服务是否运行中
@@ -25,6 +27,9 @@ class ClipboardSyncState {
 
   /// 桌面端服务 IP 地址
   final String? serverAddress;
+
+  /// 桌面端服务端口
+  final int serverPort;
 
   /// 本地剪贴板内容（桌面端实时监控）
   final String? localClipboard;
@@ -37,6 +42,9 @@ class ClipboardSyncState {
 
   /// 已连接的桌面端主机地址
   final String? connectedHost;
+
+  /// 已连接的桌面端端口
+  final int connectedPort;
 
   /// 远程（桌面端）剪贴板内容
   final String? remoteClipboard;
@@ -65,10 +73,12 @@ class ClipboardSyncState {
   const ClipboardSyncState({
     this.isServerRunning = false,
     this.serverAddress,
+    this.serverPort = ClipboardSyncService.defaultPort,
     this.localClipboard,
     this.isLoading = false,
     this.error,
     this.connectedHost,
+    this.connectedPort = ClipboardSyncService.defaultPort,
     this.remoteClipboard,
     this.isWsConnected = false,
     this.phoneClipboard,
@@ -81,34 +91,50 @@ class ClipboardSyncState {
 
   ClipboardSyncState copyWith({
     bool? isServerRunning,
-    String? serverAddress,
-    String? localClipboard,
+    Object? serverAddress = _unset,
+    int? serverPort,
+    Object? localClipboard = _unset,
     bool? isLoading,
-    String? error,
-    String? connectedHost,
-    String? remoteClipboard,
+    Object? error = _unset,
+    Object? connectedHost = _unset,
+    int? connectedPort,
+    Object? remoteClipboard = _unset,
     bool? isWsConnected,
-    String? phoneClipboard,
+    Object? phoneClipboard = _unset,
     List<FileInfo>? transferredFiles,
     double? uploadProgress,
     bool? isUploading,
-    String? downloadingFile,
+    Object? downloadingFile = _unset,
     bool? isMobileMonitoring,
   }) {
     return ClipboardSyncState(
       isServerRunning: isServerRunning ?? this.isServerRunning,
-      serverAddress: serverAddress ?? this.serverAddress,
-      localClipboard: localClipboard ?? this.localClipboard,
+      serverAddress: serverAddress == _unset
+          ? this.serverAddress
+          : serverAddress as String?,
+      serverPort: serverPort ?? this.serverPort,
+      localClipboard: localClipboard == _unset
+          ? this.localClipboard
+          : localClipboard as String?,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
-      connectedHost: connectedHost ?? this.connectedHost,
-      remoteClipboard: remoteClipboard ?? this.remoteClipboard,
+      error: error == _unset ? this.error : error as String?,
+      connectedHost: connectedHost == _unset
+          ? this.connectedHost
+          : connectedHost as String?,
+      connectedPort: connectedPort ?? this.connectedPort,
+      remoteClipboard: remoteClipboard == _unset
+          ? this.remoteClipboard
+          : remoteClipboard as String?,
       isWsConnected: isWsConnected ?? this.isWsConnected,
-      phoneClipboard: phoneClipboard ?? this.phoneClipboard,
+      phoneClipboard: phoneClipboard == _unset
+          ? this.phoneClipboard
+          : phoneClipboard as String?,
       transferredFiles: transferredFiles ?? this.transferredFiles,
       uploadProgress: uploadProgress ?? this.uploadProgress,
       isUploading: isUploading ?? this.isUploading,
-      downloadingFile: downloadingFile ?? this.downloadingFile,
+      downloadingFile: downloadingFile == _unset
+          ? this.downloadingFile
+          : downloadingFile as String?,
       isMobileMonitoring: isMobileMonitoring ?? this.isMobileMonitoring,
     );
   }
@@ -119,14 +145,16 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
   Timer? _clipboardMonitor;
   Timer? _mobileClipboardMonitor;
   String? _lastPushedClipboard;
+  String? _desktopClipboardWriteFromMobile;
 
-  ClipboardSyncNotifier(this._service) : super(const ClipboardSyncState()) {
+  ClipboardSyncNotifier(this._service, {bool autoStartServer = true})
+    : super(const ClipboardSyncState()) {
     // 设置手机剪贴板推送回调（桌面端）
     _service.onClipboardFromMobile = _onWsClipboardFromMobile;
     // 文件列表变更回调 → 桌面端自动刷新
     _service.onFileListChanged = () => fetchFileList();
 
-    if (ClipboardSyncService.isDesktopPlatform) {
+    if (autoStartServer && ClipboardSyncService.isDesktopPlatform) {
       startServer();
     }
   }
@@ -142,6 +170,7 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
       state = state.copyWith(
         isServerRunning: true,
         serverAddress: _service.serverAddress,
+        serverPort: _service.port,
         isLoading: false,
         error: null,
       );
@@ -181,7 +210,13 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final newText = data?.text ?? '';
       if (newText != (state.localClipboard ?? '')) {
-        state = state.copyWith(localClipboard: newText.isEmpty ? null : newText);
+        state = state.copyWith(
+          localClipboard: newText.isEmpty ? null : newText,
+        );
+        if (newText.isNotEmpty && newText == _desktopClipboardWriteFromMobile) {
+          _desktopClipboardWriteFromMobile = null;
+          return;
+        }
         if (newText.isNotEmpty) {
           _service.broadcastClipboard(newText);
         }
@@ -193,10 +228,14 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
   //  手机剪贴板推送回调（桌面端）
   // ════════════════════════════════════════════
 
-  void _onWsClipboardFromMobile() {
+  Future<void> _onWsClipboardFromMobile() async {
     final text = _service.cachedClipboard;
     if (text != null && text.isNotEmpty) {
-      state = state.copyWith(phoneClipboard: text);
+      _desktopClipboardWriteFromMobile = text;
+      state = state.copyWith(phoneClipboard: text, localClipboard: text);
+      try {
+        await Clipboard.setData(ClipboardData(text: text));
+      } catch (_) {}
     }
   }
 
@@ -211,30 +250,36 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
 
   /// 连接到桌面端 — 通过 WebSocket 接收实时推送
   Future<bool> connectToHost(String host) async {
+    final endpoint = _parseEndpoint(host);
     state = state.copyWith(isLoading: true, error: null);
 
-    final pingOk = await _service.ping(host);
+    final pingOk = await _service.ping(endpoint.host, port: endpoint.port);
     if (!pingOk) {
       state = state.copyWith(
         isLoading: false,
-        error: '无法连接到 $host:${ClipboardSyncService.defaultPort}，请确认桌面端已启动服务',
+        error: '无法连接到 ${endpoint.host}:${endpoint.port}，请确认桌面端已启动服务',
       );
       return false;
     }
 
     final wsOk = await _service.connectWs(
-      host,
+      endpoint.host,
+      port: endpoint.port,
       onClipboard: _onWsClipboardReceived,
       onFileListChanged: () => fetchFileList(),
     );
 
-    final initial = await _service.fetchClipboard(host);
+    final initial = await _service.fetchClipboard(
+      endpoint.host,
+      port: endpoint.port,
+    );
     if (initial != null && initial.isNotEmpty) {
       _applyClipboard(initial);
     }
 
     state = state.copyWith(
-      connectedHost: host,
+      connectedHost: endpoint.host,
+      connectedPort: endpoint.port,
       isWsConnected: wsOk,
       isLoading: false,
     );
@@ -266,7 +311,10 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
   Future<void> refreshClipboard() async {
     if (state.connectedHost == null) return;
     state = state.copyWith(isLoading: true, error: null);
-    final text = await _service.fetchClipboard(state.connectedHost!);
+    final text = await _service.fetchClipboard(
+      state.connectedHost!,
+      port: state.connectedPort,
+    );
     if (text != null && text.isNotEmpty) {
       _applyClipboard(text);
     } else if (text == null) {
@@ -287,10 +335,16 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
     // 2. 重连 WebSocket
     final host = state.connectedHost!;
     _service.disconnectWs();
-    _service.connectWs(host, onClipboard: _onWsClipboardReceived);
+    _service.connectWs(
+      host,
+      port: state.connectedPort,
+      onClipboard: _onWsClipboardReceived,
+      onFileListChanged: () => fetchFileList(),
+    );
 
     // 3. 从桌面端拉取最新剪贴板
     refreshClipboard();
+    fetchFileList();
   }
 
   Future<String?> loadLastIp() => _service.loadLastIp();
@@ -328,7 +382,31 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
   String getQrData() {
     final addr = _service.serverAddress;
     if (addr == null) return '';
-    return 'clipboardsync://$addr:${ClipboardSyncService.defaultPort}';
+    return 'clipboardsync://$addr:${_service.port}';
+  }
+
+  ({String host, int port}) _parseEndpoint(String input) {
+    final value = input.trim();
+    try {
+      final uri = Uri.parse(value);
+      if ((uri.scheme == 'clipboardsync' || uri.scheme == 'http') &&
+          uri.host.isNotEmpty) {
+        return (
+          host: uri.host,
+          port: uri.hasPort ? uri.port : ClipboardSyncService.defaultPort,
+        );
+      }
+    } catch (_) {}
+
+    final hostPort = RegExp(r'^([^:]+):(\d{1,5})$').firstMatch(value);
+    if (hostPort != null) {
+      final parsedPort = int.tryParse(hostPort.group(2)!);
+      if (parsedPort != null && parsedPort > 0 && parsedPort <= 65535) {
+        return (host: hostPort.group(1)!, port: parsedPort);
+      }
+    }
+
+    return (host: value, port: ClipboardSyncService.defaultPort);
   }
 
   // ════════════════════════════════════════════
@@ -353,24 +431,23 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
     if (_mobileClipboardMonitor != null) return;
     state = state.copyWith(isMobileMonitoring: true);
 
-    _mobileClipboardMonitor = Timer.periodic(
-      const Duration(seconds: 2),
-      (_) async {
-        if (state.connectedHost == null) {
-          stopMobileClipboardMonitor();
-          return;
+    _mobileClipboardMonitor = Timer.periodic(const Duration(seconds: 2), (
+      _,
+    ) async {
+      if (state.connectedHost == null) {
+        stopMobileClipboardMonitor();
+        return;
+      }
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        final text = data?.text ?? '';
+        if (text.isNotEmpty && text != _lastPushedClipboard) {
+          _lastPushedClipboard = text;
+          _service.sendClipboardToDesktop(text);
+          state = state.copyWith(phoneClipboard: text);
         }
-        try {
-          final data = await Clipboard.getData(Clipboard.kTextPlain);
-          final text = data?.text ?? '';
-          if (text.isNotEmpty && text != _lastPushedClipboard) {
-            _lastPushedClipboard = text;
-            _service.sendClipboardToDesktop(text);
-            state = state.copyWith(phoneClipboard: text);
-          }
-        } catch (_) {}
-      },
-    );
+      } catch (_) {}
+    });
   }
 
   /// 停止手机剪贴板监控
@@ -403,6 +480,11 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
     return null;
   }
 
+  int _resolveFilePort() {
+    if (state.connectedHost != null) return state.connectedPort;
+    return _service.port;
+  }
+
   /// 选择并上传文件
   /// Returns: true=成功, false=失败, null=用户取消
   Future<bool?> pickAndUploadFile() async {
@@ -422,7 +504,8 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
         if (!ok) {
           state = state.copyWith(
             isUploading: false,
-            error: '上传失败${_service.lastUploadError != null ? '：${_service.lastUploadError}' : '，请检查文件权限'}',
+            error:
+                '上传失败${_service.lastUploadError != null ? '：${_service.lastUploadError}' : '，请检查文件权限'}',
           );
           return false;
         }
@@ -434,7 +517,15 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
           return false as bool?;
         }
         final file = File(filePath);
-        ok = await _service.uploadFile(file, host);
+        ok = await _service.uploadFile(file, host, port: _resolveFilePort());
+        if (!ok) {
+          state = state.copyWith(
+            isUploading: false,
+            error:
+                '上传失败${_service.lastUploadError != null ? '：${_service.lastUploadError}' : '，请检查网络连接'}',
+          );
+          return false;
+        }
       }
 
       state = state.copyWith(isUploading: false, uploadProgress: 1.0);
@@ -455,7 +546,7 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
   }
 
   /// 获取文件列表
-  Future<void> fetchFileList() async {
+  Future<bool> fetchFileList() async {
     List<FileInfo> files;
     if (ClipboardSyncService.isDesktopPlatform) {
       files = await _service.fetchFileListDirect();
@@ -463,39 +554,57 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
       final host = _resolveFileHost();
       if (host == null) {
         state = state.copyWith(transferredFiles: []);
-        return;
+        return false;
       }
-      files = await _service.fetchFileList(host);
+      files = await _service.fetchFileList(host, port: _resolveFilePort());
+      if (_service.lastFileListError != null) {
+        state = state.copyWith(error: '刷新文件列表失败：${_service.lastFileListError}');
+        return false;
+      }
     }
     state = state.copyWith(transferredFiles: files, error: null);
+    return true;
   }
 
   /// 下载文件到手机
   Future<String?> downloadFile(String name) async {
     state = state.copyWith(downloadingFile: name);
 
-    String? path;
-    if (ClipboardSyncService.isDesktopPlatform) {
-      // 桌面端：直接复制本地文件（不走 HTTP）
-      path = await _service.downloadFileDirect(name);
-    } else {
-      // 移动端：通过 HTTP 下载
-      final host = _resolveFileHost();
-      if (host == null) {
-        state = state.copyWith(downloadingFile: null);
+    try {
+      String? path;
+      if (ClipboardSyncService.isDesktopPlatform) {
+        // 桌面端：直接复制本地文件（不走 HTTP）
+        path = await _service.downloadFileDirect(name);
+      } else {
+        // 移动端：通过 HTTP 下载
+        final host = _resolveFileHost();
+        if (host == null) {
+          state = state.copyWith(error: '下载失败：未连接到桌面端');
+          return null;
+        }
+        path = await _service.downloadFile(
+          name,
+          host,
+          port: _resolveFilePort(),
+        );
+      }
+
+      if (path == null) {
+        state = state.copyWith(
+          error:
+              '下载失败${_service.lastDownloadError != null ? '：${_service.lastDownloadError}' : '，请检查连接'}',
+        );
         return null;
       }
-      path = await _service.downloadFile(name, host);
-    }
 
-    state = state.copyWith(downloadingFile: null);
-
-    if (path != null) {
       try {
         await OpenFilex.open(path);
       } catch (_) {}
+      state = state.copyWith(error: null);
+      return path;
+    } finally {
+      state = state.copyWith(downloadingFile: null);
     }
-    return path;
   }
 
   /// 删除文件
@@ -506,7 +615,7 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
     } else {
       final host = _resolveFileHost();
       if (host == null) return false;
-      ok = await _service.deleteFile(name, host);
+      ok = await _service.deleteFile(name, host, port: _resolveFilePort());
     }
     if (ok) {
       await fetchFileList();
@@ -525,6 +634,6 @@ class ClipboardSyncNotifier extends StateNotifier<ClipboardSyncState> {
 
 final clipboardSyncProvider =
     StateNotifierProvider<ClipboardSyncNotifier, ClipboardSyncState>((ref) {
-  final service = ClipboardSyncService();
-  return ClipboardSyncNotifier(service);
-});
+      final service = ClipboardSyncService();
+      return ClipboardSyncNotifier(service);
+    });

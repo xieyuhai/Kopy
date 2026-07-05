@@ -38,17 +38,16 @@ class FileInfo {
   });
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'size': size,
-        'modified': modified.millisecondsSinceEpoch,
-      };
+    'name': name,
+    'size': size,
+    'modified': modified.millisecondsSinceEpoch,
+  };
 
   factory FileInfo.fromJson(Map<String, dynamic> json) => FileInfo(
-        name: json['name'] as String,
-        size: json['size'] as int,
-        modified:
-            DateTime.fromMillisecondsSinceEpoch(json['modified'] as int),
-      );
+    name: json['name'] as String,
+    size: json['size'] as int,
+    modified: DateTime.fromMillisecondsSinceEpoch(json['modified'] as int),
+  );
 }
 
 class ClipboardSyncService {
@@ -148,7 +147,8 @@ class ClipboardSyncService {
     // 所有尝试都失败
     String detail = lastError?.message ?? '未知错误';
     if (lastError?.osError != null) {
-      detail += ' (OS Error ${lastError!.osError!.errorCode}: ${lastError.osError!.message})';
+      detail +=
+          ' (OS Error ${lastError!.osError!.errorCode}: ${lastError.osError!.message})';
     }
     throw SocketException('Failed to create server socket: $detail');
   }
@@ -211,14 +211,23 @@ class ClipboardSyncService {
     } else if (method == 'GET' && path == '/files') {
       _handleFileList(request);
     } else if (method == 'GET' && path.startsWith('/files/')) {
-      _handleFileDownload(request, path.substring(7));
+      _handleFileDownload(request, _decodeFileRouteName(path));
     } else if (method == 'DELETE' && path.startsWith('/files/')) {
-      _handleFileDelete(request, path.substring(7));
+      _handleFileDelete(request, _decodeFileRouteName(path));
     } else {
       request.response.statusCode = 404;
       request.response.write('Not found');
       request.response.close();
     }
+  }
+
+  String _decodeFileRouteName(String path) {
+    return p.basename(Uri.decodeComponent(path.substring('/files/'.length)));
+  }
+
+  String _safeFileName(String name) {
+    final safeName = p.basename(name.trim());
+    return safeName.isEmpty ? 'unnamed' : safeName;
   }
 
   /// 提供投屏查看器 HTML 页面
@@ -233,8 +242,12 @@ class ClipboardSyncService {
 
   // ── 辅助：写 JSON 响应 ──
 
-  void _writeJson(HttpResponse response, int status, dynamic data,
-      {bool close = true}) {
+  void _writeJson(
+    HttpResponse response,
+    int status,
+    dynamic data, {
+    bool close = true,
+  }) {
     response.statusCode = status;
     response.headers.contentType = ContentType.json;
     response.headers.set('Access-Control-Allow-Origin', '*');
@@ -276,22 +289,19 @@ class ClipboardSyncService {
       } catch (_) {}
 
       ws.done.then((_) => _wsClients.remove(ws));
-      ws.listen(
-        (data) {
-          try {
-            final json = jsonDecode(data as String) as Map<String, dynamic>;
-            final type = json['type'] as String?;
-            if (type == 'clipboard_from_mobile') {
-              final text = json['text'] as String? ?? '';
-              if (text.isNotEmpty) {
-                _cachedClipboard = text;
-                _onWsClipboardFromMobile?.call();
-              }
+      ws.listen((data) {
+        try {
+          final json = jsonDecode(data as String) as Map<String, dynamic>;
+          final type = json['type'] as String?;
+          if (type == 'clipboard_from_mobile') {
+            final text = json['text'] as String? ?? '';
+            if (text.isNotEmpty) {
+              _cachedClipboard = text;
+              _onWsClipboardFromMobile?.call();
             }
-          } catch (_) {}
-        },
-        onError: (_) => _wsClients.remove(ws),
-      );
+          }
+        } catch (_) {}
+      }, onError: (_) => _wsClients.remove(ws));
     } catch (_) {}
   }
 
@@ -340,7 +350,9 @@ class ClipboardSyncService {
       if (contentType == null ||
           contentType.mimeType != 'multipart/form-data' ||
           !contentType.parameters.containsKey('boundary')) {
-        _writeJson(request.response, 400, {'error': 'Expected multipart/form-data'});
+        _writeJson(request.response, 400, {
+          'error': 'Expected multipart/form-data',
+        });
         return;
       }
 
@@ -379,10 +391,7 @@ class ClipboardSyncService {
         pos = headersEnd + 4; // 跳过 \r\n\r\n
 
         // 提取文件名
-        final fileNameMatch =
-            RegExp(r'filename="?(.*?)"?(\r?\n|")')
-                .firstMatch(headerSection);
-        final originalName = fileNameMatch?.group(1) ?? 'unnamed';
+        final originalName = _extractMultipartFileName(headerSection);
 
         // 查找下一个 boundary
         final nextBoundary = _indexOfBytes(body, boundaryBytes, pos);
@@ -390,7 +399,9 @@ class ClipboardSyncService {
 
         // 提取文件数据（去掉末尾的 \r\n）
         int bodyEnd = nextBoundary;
-        if (bodyEnd >= 2 && body[bodyEnd - 2] == 13 && body[bodyEnd - 1] == 10) {
+        if (bodyEnd >= 2 &&
+            body[bodyEnd - 2] == 13 &&
+            body[bodyEnd - 1] == 10) {
           bodyEnd -= 2;
         }
 
@@ -399,7 +410,9 @@ class ClipboardSyncService {
         // 重名处理：添加时间戳
         final dir = _filesDir ?? await _getFilesDir();
         final dotIndex = originalName.lastIndexOf('.');
-        final nameBody = dotIndex > 0 ? originalName.substring(0, dotIndex) : originalName;
+        final nameBody = dotIndex > 0
+            ? originalName.substring(0, dotIndex)
+            : originalName;
         final ext = dotIndex > 0 ? originalName.substring(dotIndex) : '';
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         savedName = '${nameBody}_$timestamp$ext';
@@ -452,6 +465,14 @@ class ClipboardSyncService {
     return -1;
   }
 
+  String _extractMultipartFileName(String headerSection) {
+    final quoted = RegExp(r'filename="([^"]*)"').firstMatch(headerSection);
+    final unquoted = RegExp(r'filename=([^;\r\n]*)').firstMatch(headerSection);
+    final rawName = quoted?.group(1) ?? unquoted?.group(1) ?? 'unnamed';
+    final name = p.basename(rawName.trim());
+    return name.isEmpty ? 'unnamed' : name;
+  }
+
   /// 获取本地文件列表（HTTP / 直接调用共用）
   Future<List<FileInfo>> _listLocalFiles() async {
     final dir = _filesDir ?? await _getFilesDir();
@@ -461,11 +482,13 @@ class ClipboardSyncService {
     for (final entity in entities) {
       if (entity is File) {
         final stat = await entity.stat();
-        files.add(FileInfo(
-          name: entity.uri.pathSegments.last,
-          size: stat.size,
-          modified: stat.modified,
-        ));
+        files.add(
+          FileInfo(
+            name: p.basename(entity.path),
+            size: stat.size,
+            modified: stat.modified,
+          ),
+        );
       }
     }
 
@@ -499,7 +522,8 @@ class ClipboardSyncService {
   Future<void> _handleFileDownload(HttpRequest request, String name) async {
     try {
       final dir = _filesDir ?? await _getFilesDir();
-      final file = File('${dir.path}/$name');
+      final safeName = _safeFileName(name);
+      final file = File(p.join(dir.path, safeName));
 
       if (!await file.exists()) {
         _writeJson(request.response, 404, {'error': 'File not found'});
@@ -511,7 +535,7 @@ class ClipboardSyncService {
       request.response.headers.set('Content-Type', 'application/octet-stream');
       request.response.headers.set(
         'Content-Disposition',
-        'attachment; filename="$name"',
+        'attachment; filename="${Uri.encodeComponent(safeName)}"',
       );
       request.response.headers.set('Content-Length', stat.size.toString());
       request.response.headers.set('Access-Control-Allow-Origin', '*');
@@ -537,6 +561,7 @@ class ClipboardSyncService {
 
       await file.delete();
       _writeJson(request.response, 200, {'status': 'deleted'});
+      _broadcastFileListChanged();
     } catch (e) {
       _writeJson(request.response, 500, {'error': e.toString()});
     }
@@ -546,9 +571,12 @@ class ClipboardSyncService {
   //  移动端：WebSocket 客户端
   // ═══════════════════════════════════════════════════════════
 
-  Future<bool> connectWs(String host,
-      {int port = defaultPort, VoidCallback? onClipboard,
-      VoidCallback? onFileListChanged}) async {
+  Future<bool> connectWs(
+    String host, {
+    int port = defaultPort,
+    VoidCallback? onClipboard,
+    VoidCallback? onFileListChanged,
+  }) async {
     _explicitDisconnect = false;
     _onWsClipboard = onClipboard;
     _onWsFileListChanged = onFileListChanged;
@@ -592,9 +620,12 @@ class ClipboardSyncService {
     if (_explicitDisconnect) return;
     _wsReconnectTimer?.cancel();
     _wsReconnectTimer = Timer(const Duration(seconds: 5), () {
-      connectWs(host, port: port,
+      connectWs(
+        host,
+        port: port,
         onClipboard: _onWsClipboard,
-        onFileListChanged: _onWsFileListChanged);
+        onFileListChanged: _onWsFileListChanged,
+      );
     });
   }
 
@@ -641,9 +672,7 @@ class ClipboardSyncService {
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 2);
-      final request = await client.getUrl(
-        Uri.parse('http://$host:$port/ping'),
-      );
+      final request = await client.getUrl(Uri.parse('http://$host:$port/ping'));
       final response = await request.close();
       client.close();
       return response.statusCode == 200;
@@ -652,9 +681,14 @@ class ClipboardSyncService {
     }
   }
 
+  String? lastFileListError;
+
   /// HTTP GET /files — 获取文件列表
-  Future<List<FileInfo>> fetchFileList(String host,
-      {int port = defaultPort}) async {
+  Future<List<FileInfo>> fetchFileList(
+    String host, {
+    int port = defaultPort,
+  }) async {
+    lastFileListError = null;
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 5);
@@ -665,20 +699,28 @@ class ClipboardSyncService {
       final body = await response.transform(utf8.decoder).join();
       client.close();
 
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200) {
+        lastFileListError = '服务端返回 ${response.statusCode}';
+        return [];
+      }
       final json = jsonDecode(body) as Map<String, dynamic>;
       final filesJson = json['files'] as List<dynamic>;
       return filesJson
           .map((f) => FileInfo.fromJson(f as Map<String, dynamic>))
           .toList();
-    } catch (_) {
+    } catch (e) {
+      lastFileListError = e.toString();
       return [];
     }
   }
 
   /// 上传文件到桌面端
-  Future<bool> uploadFile(File file, String host,
-      {int port = defaultPort}) async {
+  Future<bool> uploadFile(
+    File file,
+    String host, {
+    int port = defaultPort,
+  }) async {
+    lastUploadError = null;
     final client = HttpClient();
     final boundary = 'boundary-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -690,7 +732,7 @@ class ClipboardSyncService {
         'multipart/form-data; boundary=$boundary',
       );
 
-      final fileName = file.path.split('/').last;
+      final fileName = p.basename(file.path);
       final header = utf8.encode(
         '--$boundary\r\n'
         'Content-Disposition: form-data; name="file"; filename="$fileName"\r\n'
@@ -706,72 +748,106 @@ class ClipboardSyncService {
       request.add(footer);
 
       final response = await request.close();
-      await response.drain();
+      final body = await response.transform(utf8.decoder).join();
       client.close();
+      if (response.statusCode != 200) {
+        lastUploadError = body.isNotEmpty
+            ? body
+            : '服务端返回 ${response.statusCode}';
+        return false;
+      }
       return response.statusCode == 200;
     } catch (e) {
       client.close();
+      lastUploadError = e.toString();
       return false;
     }
   }
 
   /// 下载文件到本地
-  Future<String?> downloadFile(String name, String host,
-      {int port = defaultPort}) async {
+  Future<String?> downloadFile(
+    String name,
+    String host, {
+    int port = defaultPort,
+  }) async {
+    lastDownloadError = null;
+    HttpClient? client;
     try {
-      final client = HttpClient();
+      client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 30);
-      final encodedName = Uri.encodeComponent(name);
+      final safeName = _safeFileName(name);
+      final encodedName = Uri.encodeComponent(safeName);
       final request = await client.getUrl(
         Uri.parse('http://$host:$port/files/$encodedName'),
       );
       final response = await request.close();
 
       if (response.statusCode != 200) {
-        client.close();
+        final body = await response.transform(utf8.decoder).join();
+        lastDownloadError = body.isNotEmpty
+            ? body
+            : '服务端返回 ${response.statusCode}';
+        client.close(force: true);
         return null;
       }
 
       final dir = await getApplicationDocumentsDirectory();
-      final saveFile = File('${dir.path}/$name');
+      final downloadDir = Directory(p.join(dir.path, 'kopy_downloads'));
+      if (!await downloadDir.exists()) {
+        await downloadDir.create(recursive: true);
+      }
+      final saveFile = File(await _uniqueFilePath(downloadDir.path, safeName));
       await response
           .pipe(saveFile.openWrite())
           .timeout(const Duration(seconds: 120));
       client.close();
       return saveFile.path;
     } catch (e) {
+      lastDownloadError = e.toString();
+      client?.close(force: true);
       return null;
     }
   }
 
   /// 桌面端：直接从本地目录复制文件（不走 HTTP，避免自连接问题）
   Future<String?> downloadFileDirect(String name) async {
+    lastDownloadError = null;
     try {
       final dir = _filesDir ?? await _getFilesDir();
-      final sourceFile = File('${dir.path}/$name');
-      if (!await sourceFile.exists()) return null;
+      final safeName = _safeFileName(name);
+      final sourceFile = File(p.join(dir.path, safeName));
+      if (!await sourceFile.exists()) {
+        lastDownloadError = '文件不存在';
+        return null;
+      }
 
       final downloadDir = await getApplicationDocumentsDirectory();
-      String destPath = '${downloadDir.path}/$name';
-
-      // 如果目标文件已存在，添加时间戳避免覆盖
-      if (await File(destPath).exists()) {
-        final dotIndex = name.lastIndexOf('.');
-        final nameBody = dotIndex > 0 ? name.substring(0, dotIndex) : name;
-        final ext = dotIndex > 0 ? name.substring(dotIndex) : '';
-        final ts = DateTime.now().millisecondsSinceEpoch;
-        destPath = '${downloadDir.path}/${nameBody}_$ts$ext';
-      }
+      final destPath = await _uniqueFilePath(downloadDir.path, safeName);
 
       await sourceFile.copy(destPath);
       return destPath;
-    } catch (_) {
+    } catch (e) {
+      lastDownloadError = e.toString();
       return null;
     }
   }
 
+  Future<String> _uniqueFilePath(String dirPath, String fileName) async {
+    var destPath = p.join(dirPath, fileName);
+    if (!await File(destPath).exists()) return destPath;
+
+    final ext = p.extension(fileName);
+    final nameBody = p.basenameWithoutExtension(fileName);
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    destPath = p.join(dirPath, '${nameBody}_$ts$ext');
+    return destPath;
+  }
+
   /// 上次上传错误信息（供 UI 展示）
   String? lastUploadError;
+
+  /// 上次下载错误信息（供 UI 展示）
+  String? lastDownloadError;
 
   /// 桌面端：直接复制文件到剪贴板目录（不走 HTTP，避免自连接问题）
   Future<bool> uploadFileDirect(String filePath) async {
@@ -813,6 +889,7 @@ class ClipboardSyncService {
       final file = File('${dir.path}/$name');
       if (!await file.exists()) return false;
       await file.delete();
+      _broadcastFileListChanged();
       return true;
     } catch (_) {
       return false;
@@ -820,8 +897,11 @@ class ClipboardSyncService {
   }
 
   /// 删除桌面端文件（HTTP）
-  Future<bool> deleteFile(String name, String host,
-      {int port = defaultPort}) async {
+  Future<bool> deleteFile(
+    String name,
+    String host, {
+    int port = defaultPort,
+  }) async {
     try {
       final client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 5);

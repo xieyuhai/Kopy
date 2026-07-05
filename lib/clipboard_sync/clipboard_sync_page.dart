@@ -148,6 +148,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
 
     return DefaultTabController(
       length: 2,
+      initialIndex: widget.initialTab.clamp(0, 1),
       child: Scaffold(
         extendBodyBehindAppBar: true,
         appBar: _buildAppBar(isDesktop),
@@ -264,37 +265,44 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
+          _slideIn(child: _buildPlatformBadge(isDesktop, isMobile)),
+          const SizedBox(height: 20),
+          if (isDesktop) ...[
+            _slideIn(child: _buildServerSection(state, notifier), delay: 0.08),
+            if (state.isServerRunning)
+              _slideIn(child: _buildQrSection(state, notifier), delay: 0.10),
+          ],
+          if (isMobile)
+            _slideIn(
+              child: _buildConnectionSection(state, notifier),
+              delay: 0.08,
+            ),
+          if (state.error != null)
+            _slideIn(child: _buildErrorCard(state, notifier), delay: 0.12),
+          const SizedBox(height: 4),
+          // 手机剪贴板展示（桌面端）
+          if (isDesktop && state.phoneClipboard != null)
+            _slideIn(
+              child: _buildPhoneClipboardCard(state, notifier),
+              delay: 0.14,
+            ),
+          // 手机端操作（推送到 PC + 自动监控）
+          if (isMobile && state.connectedHost != null)
+            _slideIn(child: _buildMobileActions(state, notifier), delay: 0.14),
+          // 剪贴板内容展示
           _slideIn(
-            child: _buildPlatformBadge(isDesktop, isMobile),
+            child: _buildClipboardDisplay(state, notifier, isDesktop, isMobile),
+            delay: 0.16,
           ),
-        const SizedBox(height: 20),
-        if (isDesktop) ...[
-          _slideIn(child: _buildServerSection(state, notifier), delay: 0.08),
-          if (state.isServerRunning)
-            _slideIn(child: _buildQrSection(state, notifier), delay: 0.10),
+          const SizedBox(height: 4),
+          if (state.connectedHost != null)
+            _slideIn(
+              child: _buildConnectedInfo(state, notifier, isMobile),
+              delay: 0.20,
+            ),
+          if (isMobile && state.connectedHost == null && state.error == null)
+            _slideIn(child: _buildHelpCard(), delay: 0.24),
         ],
-        if (isMobile)
-          _slideIn(child: _buildConnectionSection(state, notifier), delay: 0.08),
-        if (state.error != null)
-          _slideIn(child: _buildErrorCard(state, notifier), delay: 0.12),
-        const SizedBox(height: 4),
-        // 手机剪贴板展示（桌面端）
-        if (isDesktop && state.phoneClipboard != null)
-          _slideIn(child: _buildPhoneClipboardCard(state, notifier), delay: 0.14),
-        // 手机端操作（推送到 PC + 自动监控）
-        if (isMobile && state.connectedHost != null)
-          _slideIn(child: _buildMobileActions(state, notifier), delay: 0.14),
-        // 剪贴板内容展示
-        _slideIn(
-          child: _buildClipboardDisplay(state, notifier, isDesktop, isMobile),
-          delay: 0.16,
-        ),
-        const SizedBox(height: 4),
-        if (state.connectedHost != null)
-          _slideIn(child: _buildConnectedInfo(state, notifier, isMobile), delay: 0.20),
-        if (isMobile && state.connectedHost == null && state.error == null)
-          _slideIn(child: _buildHelpCard(), delay: 0.24),
-      ],
       ),
     );
   }
@@ -310,8 +318,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
     bool isMobile,
   ) {
     final canAccessFiles =
-        isDesktop ||
-        (isMobile && state.connectedHost != null);
+        isDesktop || (isMobile && state.connectedHost != null);
 
     if (!canAccessFiles) {
       return Center(
@@ -337,13 +344,8 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               ),
               const SizedBox(height: 8),
               Text(
-                isDesktop
-                    ? '选择文件上传或管理已传输的文件'
-                    : '连接后可在手机和电脑之间传输文件',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: _Theme.textMuted,
-                ),
+                isDesktop ? '选择文件上传或管理已传输的文件' : '连接后可在手机和电脑之间传输文件',
+                style: const TextStyle(fontSize: 12, color: _Theme.textMuted),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -399,7 +401,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
           : _Theme.neonPurple.withOpacity(0.25),
       child: Row(
         children: [
-          _NeonIcon(icon: icon, size: 28, color: isDesktop ? _Theme.neonCyan : _Theme.neonPurple),
+          _NeonIcon(
+            icon: icon,
+            size: 28,
+            color: isDesktop ? _Theme.neonCyan : _Theme.neonPurple,
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -443,7 +449,9 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
       borderColor: state.isServerRunning
           ? _Theme.neonGreen.withOpacity(0.25)
           : _Theme.neonRose.withOpacity(0.25),
-      glowColor: state.isServerRunning ? _Theme.neonGreen.withOpacity(0.08) : null,
+      glowColor: state.isServerRunning
+          ? _Theme.neonGreen.withOpacity(0.08)
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -462,25 +470,29 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.5,
-                  color: state.isServerRunning ? _Theme.neonGreen : _Theme.neonRose,
+                  color: state.isServerRunning
+                      ? _Theme.neonGreen
+                      : _Theme.neonRose,
                 ),
               ),
               const Spacer(),
-              if (state.isLoading)
-                _NeonSpinner(),
+              if (state.isLoading) _NeonSpinner(),
             ],
           ),
 
           if (state.isServerRunning && state.serverAddress != null) ...[
             const SizedBox(height: 16),
             _AddressChip(
-              address:
-                  'http://${state.serverAddress}:${ClipboardSyncService.defaultPort}',
+              address: 'http://${state.serverAddress}:${state.serverPort}',
             ),
             const SizedBox(height: 14),
             Row(
               children: [
-                Icon(Icons.bolt, size: 14, color: _Theme.neonAmber.withOpacity(0.8)),
+                Icon(
+                  Icons.bolt,
+                  size: 14,
+                  color: _Theme.neonAmber.withOpacity(0.8),
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   'WebSocket 实时推送 · 复制即同步',
@@ -498,8 +510,12 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
           const SizedBox(height: 18),
 
           _GradientButton(
-            gradient: state.isServerRunning ? _Theme.gradientRose : _Theme.gradientCyan,
-            icon: state.isServerRunning ? Icons.stop_rounded : Icons.play_arrow_rounded,
+            gradient: state.isServerRunning
+                ? _Theme.gradientRose
+                : _Theme.gradientCyan,
+            icon: state.isServerRunning
+                ? Icons.stop_rounded
+                : Icons.play_arrow_rounded,
             label: state.isServerRunning ? '停止服务' : '启动服务',
             onPressed: () async {
               if (state.isServerRunning) {
@@ -528,7 +544,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
         children: [
           Row(
             children: [
-              _NeonIcon(icon: Icons.qr_code_2_rounded, size: 20, color: _Theme.neonCyan),
+              _NeonIcon(
+                icon: Icons.qr_code_2_rounded,
+                size: 20,
+                color: _Theme.neonCyan,
+              ),
               const SizedBox(width: 10),
               const Text(
                 '手机扫码连接',
@@ -612,7 +632,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
         children: [
           Row(
             children: [
-              _NeonIcon(icon: Icons.phone_iphone_rounded, size: 20, color: _Theme.neonAmber),
+              _NeonIcon(
+                icon: Icons.phone_iphone_rounded,
+                size: 20,
+                color: _Theme.neonAmber,
+              ),
               const SizedBox(width: 10),
               const Text(
                 '来自手机',
@@ -626,15 +650,15 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               const Spacer(),
               Row(
                 children: [
-                  Icon(Icons.access_time_rounded,
-                      size: 12, color: _Theme.textMuted),
+                  Icon(
+                    Icons.access_time_rounded,
+                    size: 12,
+                    color: _Theme.textMuted,
+                  ),
                   const SizedBox(width: 4),
                   const Text(
                     '刚刚推送',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: _Theme.textMuted,
-                    ),
+                    style: TextStyle(fontSize: 11, color: _Theme.textMuted),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -654,9 +678,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             decoration: BoxDecoration(
               color: const Color(0x0DFFFFFF),
               borderRadius: BorderRadius.circular(_Theme.radiusSm),
-              border: Border.all(
-                color: _Theme.neonAmber.withOpacity(0.15),
-              ),
+              border: Border.all(color: _Theme.neonAmber.withOpacity(0.15)),
             ),
             child: SingleChildScrollView(
               child: SelectableText(
@@ -709,7 +731,9 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
       borderColor: state.connectedHost != null
           ? _Theme.neonGreen.withOpacity(0.25)
           : _Theme.neonPurple.withOpacity(0.25),
-      glowColor: state.connectedHost != null ? _Theme.neonGreen.withOpacity(0.06) : null,
+      glowColor: state.connectedHost != null
+          ? _Theme.neonGreen.withOpacity(0.06)
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -758,15 +782,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 const SizedBox(width: 8),
                 _GradientButton(
                   gradient: _Theme.gradientCyan,
-                  icon: state.isLoading
-                      ? null
-                      : Icons.link_rounded,
+                  icon: state.isLoading ? null : Icons.link_rounded,
                   label: state.isLoading ? '连接中' : '连接',
                   compact: true,
                   loading: state.isLoading,
-                  onPressed: state.isLoading
-                      ? null
-                      : () => _connect(notifier),
+                  onPressed: state.isLoading ? null : () => _connect(notifier),
                 ),
               ] else
                 _GradientButton(
@@ -786,9 +806,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               decoration: BoxDecoration(
                 color: _Theme.neonGreen.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(_Theme.radiusSm),
-                border: Border.all(
-                  color: _Theme.neonGreen.withOpacity(0.2),
-                ),
+                border: Border.all(color: _Theme.neonGreen.withOpacity(0.2)),
               ),
               child: Row(
                 children: [
@@ -838,8 +856,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                         const SizedBox(height: 2),
                         Row(
                           children: [
-                            Icon(Icons.notifications_active,
-                                size: 12, color: _Theme.textMuted),
+                            Icon(
+                              Icons.notifications_active,
+                              size: 12,
+                              color: _Theme.textMuted,
+                            ),
                             const SizedBox(width: 4),
                             const Text(
                               '后台同步 · 退到桌面仍可接收',
@@ -882,7 +903,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
         children: [
           Row(
             children: [
-              _NeonIcon(icon: Icons.send_rounded, size: 20, color: _Theme.neonCyan),
+              _NeonIcon(
+                icon: Icons.send_rounded,
+                size: 20,
+                color: _Theme.neonCyan,
+              ),
               const SizedBox(width: 10),
               const Text(
                 '手机剪贴板 → PC',
@@ -987,8 +1012,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
       ),
       child: Row(
         children: [
-          Icon(Icons.error_outline_rounded,
-              color: _Theme.neonRose.withOpacity(0.9), size: 22),
+          Icon(
+            Icons.error_outline_rounded,
+            color: _Theme.neonRose.withOpacity(0.9),
+            size: 22,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -1005,8 +1033,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             borderRadius: BorderRadius.circular(20),
             child: Padding(
               padding: const EdgeInsets.all(4),
-              child: Icon(Icons.close_rounded,
-                  color: _Theme.neonRose.withOpacity(0.6), size: 20),
+              child: Icon(
+                Icons.close_rounded,
+                color: _Theme.neonRose.withOpacity(0.6),
+                size: 20,
+              ),
             ),
           ),
         ],
@@ -1040,7 +1071,9 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
           Row(
             children: [
               _NeonIcon(
-                icon: isDesktop ? Icons.content_paste_rounded : Icons.content_paste_go_rounded,
+                icon: isDesktop
+                    ? Icons.content_paste_rounded
+                    : Icons.content_paste_go_rounded,
                 size: 20,
                 color: accentColor,
               ),
@@ -1055,8 +1088,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 ),
               ),
               const Spacer(),
-              if (state.isLoading && isMobile)
-                _NeonSpinner(size: 16),
+              if (state.isLoading && isMobile) _NeonSpinner(size: 16),
               if (isMobile && state.connectedHost != null)
                 _GlassIconButton(
                   icon: Icons.refresh_rounded,
@@ -1072,18 +1104,18 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               isDesktop
                   ? Icons.content_copy_rounded
                   : state.connectedHost == null
-                      ? Icons.link_off_rounded
-                      : Icons.hourglass_empty_rounded,
+                  ? Icons.link_off_rounded
+                  : Icons.hourglass_empty_rounded,
               isDesktop
                   ? '暂未检测到剪贴板内容'
                   : state.connectedHost == null
-                      ? '未连接到桌面端'
-                      : '等待中',
+                  ? '未连接到桌面端'
+                  : '等待中',
               isDesktop
                   ? '在电脑上复制文本后将自动显示在这里'
                   : state.connectedHost == null
-                      ? '连接后 PC 剪贴板内容将自动显示'
-                      : 'PC 剪贴板为空，复制内容后将自动同步',
+                  ? '连接后 PC 剪贴板内容将自动显示'
+                  : 'PC 剪贴板为空，复制内容后将自动同步',
               accentColor,
             )
           else ...[
@@ -1094,9 +1126,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               decoration: BoxDecoration(
                 color: const Color(0x0DFFFFFF),
                 borderRadius: BorderRadius.circular(_Theme.radiusSm),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.06),
-                ),
+                border: Border.all(color: Colors.white.withOpacity(0.06)),
               ),
               child: SingleChildScrollView(
                 child: SelectableText(
@@ -1142,8 +1172,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 padding: const EdgeInsets.only(top: 10),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle_rounded,
-                        size: 14, color: _Theme.neonGreen),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 14,
+                      color: _Theme.neonGreen,
+                    ),
                     const SizedBox(width: 6),
                     const Text(
                       '内容已复制到系统剪贴板，长按输入框即可粘贴',
@@ -1164,12 +1197,21 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
   }
 
   Widget _buildEmptyState(
-      IconData icon, String title, String subtitle, Color accent) {
+    IconData icon,
+    String title,
+    String subtitle,
+    Color accent,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 28),
       child: Column(
         children: [
-          _NeonIcon(icon: icon, size: 44, color: _Theme.textMuted, opacity: 0.5),
+          _NeonIcon(
+            icon: icon,
+            size: 44,
+            color: _Theme.textMuted,
+            opacity: 0.5,
+          ),
           const SizedBox(height: 12),
           Text(
             title,
@@ -1224,11 +1266,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  state.isWsConnected
-                      ? 'WebSocket 实时推送中'
-                      : 'HTTP 降级模式',
+                  state.isWsConnected ? 'WebSocket 实时推送中' : 'HTTP 降级模式',
                   style: TextStyle(
-                    color: state.isWsConnected ? _Theme.neonGreen : _Theme.neonAmber,
+                    color: state.isWsConnected
+                        ? _Theme.neonGreen
+                        : _Theme.neonAmber,
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                     letterSpacing: 0.4,
@@ -1241,8 +1283,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             const SizedBox(height: 10),
             Row(
               children: [
-                Icon(Icons.sync_rounded,
-                    size: 14, color: _Theme.neonGreen.withOpacity(0.7)),
+                Icon(
+                  Icons.sync_rounded,
+                  size: 14,
+                  color: _Theme.neonGreen.withOpacity(0.7),
+                ),
                 const SizedBox(width: 6),
                 const Text(
                   'PC 复制后即时同步到手机 · 无需手动刷新',
@@ -1275,7 +1320,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
         children: [
           Row(
             children: [
-              _NeonIcon(icon: Icons.upload_file_rounded, size: 20, color: _Theme.neonCyan),
+              _NeonIcon(
+                icon: Icons.upload_file_rounded,
+                size: 20,
+                color: _Theme.neonCyan,
+              ),
               const SizedBox(width: 10),
               const Text(
                 '文件传输',
@@ -1291,8 +1340,15 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 icon: Icons.refresh_rounded,
                 size: 18,
                 onPressed: () async {
-                  await notifier.fetchFileList();
-                  _showSnack('已刷新文件列表');
+                  final ok = await notifier.fetchFileList();
+                  final latestState = ref.read(clipboardSyncProvider);
+                  if (ok) {
+                    _showSnack(
+                      '已刷新文件列表，共 ${latestState.transferredFiles.length} 个文件',
+                    );
+                  } else {
+                    _showSnack(latestState.error ?? '刷新文件列表失败，请检查连接状态');
+                  }
                 },
               ),
             ],
@@ -1305,7 +1361,10 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             onPressed: () async {
               final ok = await notifier.pickAndUploadFile();
               if (ok == true) {
-                final count = ref.read(clipboardSyncProvider).transferredFiles.length;
+                final count = ref
+                    .read(clipboardSyncProvider)
+                    .transferredFiles
+                    .length;
                 _showSnack('文件上传成功，共 $count 个文件');
               } else if (ok == false) {
                 final err = ref.read(clipboardSyncProvider).error;
@@ -1342,9 +1401,13 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
-                    value: state.uploadProgress > 0 ? state.uploadProgress : null,
+                    value: state.uploadProgress > 0
+                        ? state.uploadProgress
+                        : null,
                     backgroundColor: Colors.white.withOpacity(0.1),
-                    valueColor: const AlwaysStoppedAnimation<Color>(_Theme.neonCyan),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      _Theme.neonCyan,
+                    ),
                     minHeight: 3,
                   ),
                 ),
@@ -1383,8 +1446,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
             child: Row(
               children: [
-                Icon(Icons.description_rounded,
-                    size: 16, color: _Theme.neonPurple.withOpacity(0.7)),
+                Icon(
+                  Icons.description_rounded,
+                  size: 16,
+                  color: _Theme.neonPurple.withOpacity(0.7),
+                ),
                 const SizedBox(width: 8),
                 Text(
                   '共 ${state.transferredFiles.length} 个文件',
@@ -1418,9 +1484,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.04)),
-        ),
+        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.04))),
       ),
       child: Row(
         children: [
@@ -1497,7 +1561,8 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
                 if (path != null) {
                   _showSnack('已保存到：$path');
                 } else {
-                  _showSnack('下载失败，请检查连接');
+                  final err = ref.read(clipboardSyncProvider).error;
+                  _showSnack(err ?? '下载失败，请检查连接');
                 }
               },
             ),
@@ -1595,8 +1660,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               Navigator.pop(ctx);
               notifier.deleteFile(file.name);
             },
-            child: const Text('删除',
-                style: TextStyle(color: _Theme.neonRose)),
+            child: const Text('删除', style: TextStyle(color: _Theme.neonRose)),
           ),
         ],
       ),
@@ -1634,26 +1698,10 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             ],
           ),
           const SizedBox(height: 16),
-          _buildStep(
-            1,
-            '在电脑上打开本应用 → 自动启动剪贴板服务',
-            _Theme.neonCyan,
-          ),
-          _buildStep(
-            2,
-            '记下显示的 IP 地址或扫描 QR 码',
-            _Theme.neonCyan,
-          ),
-          _buildStep(
-            3,
-            '在手机上输入上方 IP 并点击"连接"，或扫码自动连接',
-            _Theme.neonPurple,
-          ),
-          _buildStep(
-            4,
-            '在电脑上复制 → 手机实时收到 → 直接粘贴',
-            _Theme.neonGreen,
-          ),
+          _buildStep(1, '在电脑上打开本应用 → 自动启动剪贴板服务', _Theme.neonCyan),
+          _buildStep(2, '记下显示的 IP 地址或扫描 QR 码', _Theme.neonCyan),
+          _buildStep(3, '在手机上输入上方 IP 并点击"连接"，或扫码自动连接', _Theme.neonPurple),
+          _buildStep(4, '在电脑上复制 → 手机实时收到 → 直接粘贴', _Theme.neonGreen),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.all(10),
@@ -1664,7 +1712,11 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
             ),
             child: Row(
               children: [
-                Icon(Icons.wifi_rounded, size: 16, color: _Theme.neonAmber.withOpacity(0.8)),
+                Icon(
+                  Icons.wifi_rounded,
+                  size: 16,
+                  color: _Theme.neonAmber.withOpacity(0.8),
+                ),
                 const SizedBox(width: 8),
                 const Text(
                   '请确保手机和电脑在同一个局域网内',
@@ -1698,10 +1750,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
               ),
               shape: BoxShape.circle,
               boxShadow: [
-                BoxShadow(
-                  color: accent.withOpacity(0.3),
-                  blurRadius: 8,
-                ),
+                BoxShadow(color: accent.withOpacity(0.3), blurRadius: 8),
               ],
             ),
             child: Text(
@@ -1767,7 +1816,10 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
       SnackBar(
         content: Text(
           msg,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
         ),
         backgroundColor: const Color(0xFF1A1050),
         behavior: SnackBarBehavior.floating,
@@ -1818,10 +1870,7 @@ class _ClipboardSyncPageState extends ConsumerState<ClipboardSyncPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text(
-              '关闭',
-              style: TextStyle(color: _Theme.neonCyan),
-            ),
+            child: const Text('关闭', style: TextStyle(color: _Theme.neonCyan)),
           ),
         ],
       ),
@@ -1936,7 +1985,10 @@ class _HelpSection extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('•  ', style: TextStyle(color: _Theme.neonPurple.withOpacity(0.6))),
+                Text(
+                  '•  ',
+                  style: TextStyle(color: _Theme.neonPurple.withOpacity(0.6)),
+                ),
                 Expanded(
                   child: Text(
                     item,
@@ -1983,11 +2035,7 @@ class _GlassCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(_Theme.radiusMd),
         boxShadow: [
           if (glowColor != null)
-            BoxShadow(
-              color: glowColor!,
-              blurRadius: 24,
-              spreadRadius: 0,
-            ),
+            BoxShadow(color: glowColor!, blurRadius: 24, spreadRadius: 0),
         ],
       ),
       child: ClipRRect(
@@ -2099,10 +2147,7 @@ class _NeonIcon extends StatelessWidget {
         color: color.withOpacity(0.1 * opacity),
         shape: BoxShape.circle,
         boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.15 * opacity),
-            blurRadius: 12,
-          ),
+          BoxShadow(color: color.withOpacity(0.15 * opacity), blurRadius: 12),
         ],
       ),
       child: Icon(icon, size: size, color: color.withOpacity(opacity)),
@@ -2124,10 +2169,7 @@ class _SignalIndicator extends StatelessWidget {
       width: 28,
       height: 20,
       child: CustomPaint(
-        painter: _SignalPainter(
-          connected: connected,
-          pulseCtrl: pulseCtrl,
-        ),
+        painter: _SignalPainter(connected: connected, pulseCtrl: pulseCtrl),
       ),
     );
   }
@@ -2220,36 +2262,32 @@ class _NeonTextField extends StatelessWidget {
           fontSize: 14,
           fontFamily: 'monospace',
         ),
-        prefixIcon: Icon(Icons.language_rounded,
-            size: 18, color: _Theme.neonPurple.withOpacity(0.7)),
+        prefixIcon: Icon(
+          Icons.language_rounded,
+          size: 18,
+          color: _Theme.neonPurple.withOpacity(0.7),
+        ),
         filled: true,
-        fillColor: enabled
-            ? const Color(0x10FFFFFF)
-            : const Color(0x08FFFFFF),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        fillColor: enabled ? const Color(0x10FFFFFF) : const Color(0x08FFFFFF),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_Theme.radiusSm),
-          borderSide: BorderSide(
-            color: _Theme.neonPurple.withOpacity(0.3),
-          ),
+          borderSide: BorderSide(color: _Theme.neonPurple.withOpacity(0.3)),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_Theme.radiusSm),
-          borderSide: BorderSide(
-            color: _Theme.neonPurple.withOpacity(0.2),
-          ),
+          borderSide: BorderSide(color: _Theme.neonPurple.withOpacity(0.2)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_Theme.radiusSm),
-          borderSide: BorderSide(
-            color: _Theme.neonCyan.withOpacity(0.5),
-          ),
+          borderSide: BorderSide(color: _Theme.neonCyan.withOpacity(0.5)),
         ),
         disabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(_Theme.radiusSm),
-          borderSide: BorderSide(
-            color: Colors.white.withOpacity(0.05),
-          ),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.05)),
         ),
       ),
     );
@@ -2306,7 +2344,9 @@ class _GradientButton extends StatelessWidget {
         style: style,
         child: Row(
           mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
-          mainAxisAlignment: compact ? MainAxisAlignment.center : MainAxisAlignment.center,
+          mainAxisAlignment: compact
+              ? MainAxisAlignment.center
+              : MainAxisAlignment.center,
           children: [
             if (loading)
               const SizedBox(
@@ -2383,11 +2423,7 @@ class _GlassIconButton extends StatelessWidget {
   final double size;
   final VoidCallback? onPressed;
 
-  const _GlassIconButton({
-    required this.icon,
-    this.size = 20,
-    this.onPressed,
-  });
+  const _GlassIconButton({required this.icon, this.size = 20, this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -2448,7 +2484,11 @@ class _AddressChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.link_rounded, size: 16, color: _Theme.neonCyan.withOpacity(0.8)),
+          Icon(
+            Icons.link_rounded,
+            size: 16,
+            color: _Theme.neonCyan.withOpacity(0.8),
+          ),
           const SizedBox(width: 8),
           SelectableText(
             address,
@@ -2472,10 +2512,7 @@ class _AnimatedBg extends StatelessWidget {
   final AnimationController shimmerCtrl;
   final Widget child;
 
-  const _AnimatedBg({
-    required this.shimmerCtrl,
-    required this.child,
-  });
+  const _AnimatedBg({required this.shimmerCtrl, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -2529,9 +2566,7 @@ class _AnimatedBg extends StatelessWidget {
               ),
               Positioned.fill(
                 child: CustomPaint(
-                  painter: _GridPainter(
-                    phase: shimmerCtrl.value * 0.1,
-                  ),
+                  painter: _GridPainter(phase: shimmerCtrl.value * 0.1),
                 ),
               ),
               child!,
